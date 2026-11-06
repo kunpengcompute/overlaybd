@@ -1,7 +1,7 @@
 name: PR-Pipeline_overlaybd
 
 on: # 自动触发工作流运行的触发条件
-  pull_request:          # MR 事件触发
+  pull_request_target:          # MR 事件触发
     types: ["open", "reopen", "update"]
     branches: ["*"]
   pull_request_comment:         # 评论触发（/compile、/ci、/recheck）
@@ -31,33 +31,65 @@ env:
   ci_image: "swr.cn-north-4.myhuaweicloud.com/cloud_boostkit/ubuntu_22.04:overlaybd_arm_01"
 
 stages:
-  # stage0: # 流水线状态管理（非项目逻辑）
-  #   name: 初始化阶段
-  #   select: selected_by_default
-  #   jobs:
-  #     associate_pr_comment:
-  #       name: associate_pr_comment
-  #       runs-on: [ self-hosted, os=euler, arch=arm64, type=pr, flavor=small ]
-  #       steps:
-  #         - name: associate_pr_comment
-  #           uses: associate-pr-comment
-  #     init_pipeline_status: # 打运行中标签
-  #       name: init_pipeline_status
-  #       runs-on: [ self-hosted, os=euler, arch=arm64, type=pr, flavor=small ]
-  #       steps:
-  #         - name: add running label
-  #           uses: openlibing/pr-label-action@v1.0.0
-  #           with:
-  #             add_labels: ci-pipeline-running
-  #             remove_labels: ci-pipeline-passed,ci-pipeline-failed
-  #             token: ${{ secrets.PR_LABEL_TOKEN }}
+  stage0: # 流水线状态管理（非项目逻辑）
+    name: 初始化阶段
+    select: selected_by_default
+    jobs:
+      associate_pr_comment:
+        name: associate_pr_comment
+        runs-on: [ self-hosted, os=euler, arch=arm64, type=pr, flavor=small ]
+        steps:
+          - name: associate_pr_comment
+            uses: associate-pr-comment
+      init_pipeline_status: # 打运行中标签
+        name: init_pipeline_status
+        runs-on: [ self-hosted, os=euler, arch=arm64, type=pr, flavor=small ]
+        steps:
+          - name: add running label
+            uses: openlibing/pr-label-action@v1.0.0
+            with:
+              add_labels: ci-pipeline-running
+              remove_labels: ci-pipeline-passed,ci-pipeline-failed
+              token: ${{ secrets.PR_LABEL_TOKEN }}
 
   stage1: # 校验阶段
     name: 校验阶段
     select: selected_by_default
     jobs:
+      check_skip: # 取 PR 标题判断是否跳过校验（评论事件负载不含 title，回退查 API）
+        name: check_skip
+        runs-on: ["ubuntu-latest", "x64", "slim"]
+        outputs:
+          skip: ${{ steps.check.outputs.skip }}
+        steps:
+          - name: resolve pr title
+            id: check
+            env:
+              PR_TITLE: ${{ atomgit.event.pull_request.title }}
+              PR_ID: ${{ env.pr_id }}
+              REPO: ${{ atomgit.repository }}
+              GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
+            run: |
+              set -u
+              title="$PR_TITLE"
+              if [ -z "$title" ]; then
+                api="https://api.gitcode.com/api/v5/repos/${REPO}/pulls/${PR_ID}"
+                if [ -n "${GIT_TOKEN}" ]; then
+                  api="${api}?access_token=${GIT_TOKEN}"
+                fi
+                title=$(curl -sS --max-time 30 "$api" | grep -o '"title":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+              fi
+              echo "pr title: $title"
+              case "$title" in
+                *ci-pipeline-skip*) echo "skip=true" >> "$ATOMGIT_OUTPUT" ;;
+                *) echo "skip=false" >> "$ATOMGIT_OUTPUT" ;;
+              esac
+
       Detect_file_changes: # 纯文档 MR 跳过 build/ut（必备作业）
         name: Detect_file_changes
+        needs: [ check_skip ]
+        # 标题含 ci-pipeline-skip 时跳过所有校验，post 阶段直接打 ci-pipeline-passed
+        if: ${{ jobs.check_skip.outputs.skip != 'true' }}
         runs-on: ["ubuntu-latest", "x64", "slim"]
         outputs:
           need_build: ${{ steps.set-skip.outputs.need_build }}
@@ -106,26 +138,32 @@ stages:
                 echo "need_build=yes" >> "$ATOMGIT_OUTPUT"
               fi
 
-      # sca-pr:
-      #   name: sca-pr
-      #   runs-on: ["ubuntu-latest", "x64", "slim"]
-      #   steps:
-      #     - name: sca pr scan
-      #       uses: openlibing/sca-action/sca-pr-action@v1.0.0
-      #       with:
-      #         project-name: "boostkit"
+      SCA_pr:
+        name: SCA_pr
+        needs: [ check_skip ]
+        if: ${{ jobs.check_skip.outputs.skip != 'true' }}
+        runs-on: ["ubuntu-latest", "x64", "slim"]
+        steps:
+          - name: sca pr scan
+            uses: openlibing/sca-action/sca-pr-action@v1.0.0
+            with:
+              project-name: "boostkit"
 
-      # malicious-scan:
-      #   name: malicious-scan
-      #   runs-on: ["ubuntu-latest", "x64", "slim"]
-      #   steps:
-      #     - name: malicious code scan
-      #       uses: openlibing/malicious-code-scan-action/malicious-code-pr-scan-action@v1.0.0
-      #       with:
-      #         project-name: "boostkit"
+      AntiPoison:
+        name: AntiPoison
+        needs: [ check_skip ]
+        if: ${{ jobs.check_skip.outputs.skip != 'true' }}
+        runs-on: ["ubuntu-latest", "x64", "slim"]
+        steps:
+          - name: malicious code scan
+            uses: openlibing/malicious-code-scan-action/malicious-code-pr-scan-action@v1.0.0
+            with:
+              project-name: "boostkit"
 
       pre-commit: # 代码风格检查（仓库 .pre-commit-config.yaml）
         name: pre-commit
+        needs: [ check_skip ]
+        if: ${{ jobs.check_skip.outputs.skip != 'true' }}
         runs-on: ["ubuntu-latest", "x64", "slim"]
         steps:
           - name: Checkout
@@ -155,8 +193,8 @@ stages:
 
       build:
         name: build
-        if: ${{ jobs.Detect_file_changes.outputs.need_build == 'yes' }}
-        needs: [ Detect_file_changes ]      # 门控 outputs 引用必须保留
+        if: ${{ jobs.check_skip.outputs.skip != 'true' && jobs.Detect_file_changes.outputs.need_build == 'yes' }}
+        needs: [ check_skip, Detect_file_changes ]      # 门控 outputs 引用必须保留
         uses: .gitcode/workflows/build_job.yml
         with:
           docker_img: "${{ env.ci_image }}"
@@ -166,8 +204,8 @@ stages:
 
       ut:
         name: ut
-        if: ${{ jobs.Detect_file_changes.outputs.need_build == 'yes' }}
-        needs: [ Detect_file_changes ]      # 门控 outputs 引用必须保留
+        if: ${{ jobs.check_skip.outputs.skip != 'true' && jobs.Detect_file_changes.outputs.need_build == 'yes' }}
+        needs: [ check_skip, Detect_file_changes ]      # 门控 outputs 引用必须保留
         uses: .gitcode/workflows/ut_job.yml
         with:
           docker_img: "${{ env.ci_image }}"
@@ -175,15 +213,37 @@ stages:
           branch: "${{ env.branch }}"
           default_branch: "${{ env.default_branch }}"
 
-# post:
-#   jobs:
-#     update_pipeline_status:
-#       name: update_pipeline_status
-#       runs-on: ["ubuntu-latest", "x64", "slim"]
-#       steps:
-#         - name: Set result label
-#           uses: openlibing/pr-label-action@v1.0.0
-#           with:
-#             add_labels: ${{ pipeline.upstream_status == 'COMPLETED' && 'ci-pipeline-passed' || 'ci-pipeline-failed' }}
-#             remove_labels: ci-pipeline-running,${{ pipeline.upstream_status == 'COMPLETED' && 'ci-pipeline-failed' || 'ci-pipeline-passed' }}
-#             token: ${{ secrets.PR_LABEL_TOKEN }}
+post:
+  jobs:
+    update_pipeline_status:
+      name: update_pipeline_status
+      runs-on: ["ubuntu-latest", "x64", "slim"]
+      steps:
+        - name: resolve skip flag
+          id: skip
+          env:
+            PR_TITLE: ${{ atomgit.event.pull_request.title }}
+            PR_ID: ${{ env.pr_id }}
+            REPO: ${{ atomgit.repository }}
+            GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
+          run: |
+            set -u
+            title="$PR_TITLE"
+            if [ -z "$title" ]; then
+              api="https://api.gitcode.com/api/v5/repos/${REPO}/pulls/${PR_ID}"
+              if [ -n "${GIT_TOKEN}" ]; then
+                api="${api}?access_token=${GIT_TOKEN}"
+              fi
+              title=$(curl -sS --max-time 30 "$api" | grep -o '"title":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+            fi
+            echo "pr title: $title"
+            case "$title" in
+              *ci-pipeline-skip*) echo "skip=true" >> "$ATOMGIT_OUTPUT" ;;
+              *) echo "skip=false" >> "$ATOMGIT_OUTPUT" ;;
+            esac
+        - name: Set result label
+          uses: openlibing/pr-label-action@v1.0.0
+          with:
+            add_labels: ${{ steps.skip.outputs.skip == 'true' && 'ci-pipeline-passed' || (pipeline.upstream_status == 'COMPLETED' && 'ci-pipeline-passed' || 'ci-pipeline-failed') }}
+            remove_labels: ci-pipeline-running,${{ steps.skip.outputs.skip == 'true' && 'ci-pipeline-failed' || (pipeline.upstream_status == 'COMPLETED' && 'ci-pipeline-failed' || 'ci-pipeline-passed') }}
+            token: ${{ secrets.PR_LABEL_TOKEN }}

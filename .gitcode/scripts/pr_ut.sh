@@ -29,5 +29,8 @@ cmake -S . -B build \
 
 cmake --build build -j8
 
+# image_service_test requires the base layer at this fixed path.
+install -D -m 644 build/output/ext4_64 /opt/overlaybd/baselayers/ext4_64
+
 cd build
 ctest -j8 --output-on-failure -C Debug --timeout 900

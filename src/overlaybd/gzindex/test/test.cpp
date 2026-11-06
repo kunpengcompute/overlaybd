@@ -236,10 +236,10 @@ void handler(photon::net::ISocketStream *sock) {
     auto fn_idx = gzstream->save_index();
     LOG_INFO("RECV `, fn_idx: `", count, fn_idx.c_str());
 
-
-    // ASSERT_STREQ(sha256sum("/tmp/dest").c_str(), "sha256:562688d70dcd1596556e7c671c1266f6e9c22b4f4fb8344efa8bed88fc2bac7b");
-    // ASSERT_STREQ(sha256sum(fn_idx.c_str()).c_str(), "sha256:af3ffd4965d83f3d235c48ce75e16a1f2edf12d0e5d82816d7066a8485aade82");
-
+    // ASSERT_STREQ(sha256sum("/tmp/dest").c_str(),
+    // "sha256:562688d70dcd1596556e7c671c1266f6e9c22b4f4fb8344efa8bed88fc2bac7b");
+    // ASSERT_STREQ(sha256sum(fn_idx.c_str()).c_str(),
+    // "sha256:af3ffd4965d83f3d235c48ce75e16a1f2edf12d0e5d82816d7066a8485aade82");
 }
 
 void uds_server() {
@@ -293,29 +293,26 @@ TEST_F(GzIndexTest, stream) {
     auto lfs = photon::fs::new_localfs_adaptor(workdir.c_str());
     LOG_INFO("start streamFile test");
     std::vector<std::string> filelist = {
-    //    "https://dadi-shared.oss-cn-beijing.aliyuncs.com/cri-containerd-cni-1.5.2-linux-amd64.tar.gz",
+        //    "https://dadi-shared.oss-cn-beijing.aliyuncs.com/cri-containerd-cni-1.5.2-linux-amd64.tar.gz",
         "https://github.com/containerd/containerd/releases/download/v1.5.17/cri-containerd-cni-1.5.17-linux-amd64.tar.gz",
         "https://github.com/containerd/containerd/releases/download/v1.4.4/containerd-1.4.4-linux-amd64.tar.gz",
-    //    "https://dadi-shared.oss-cn-beijing.aliyuncs.com/containerd-1.4.4-linux-amd64.tar.gz",
-    //    "https://dadi-shared.oss-cn-beijing.aliyuncs.com/go1.13.linux-amd64.tar.gz",
-        "https://go.dev/dl/go1.17.6.linux-amd64.tar.gz",
-        // "https://dadi-shared.oss-cn-beijing.aliyuncs.com/go1.17.6.linux-amd64.tar.gz"
+        //    "https://dadi-shared.oss-cn-beijing.aliyuncs.com/containerd-1.4.4-linux-amd64.tar.gz",
+        //    "https://dadi-shared.oss-cn-beijing.aliyuncs.com/go1.13.linux-amd64.tar.gz",
+        "https://dadi-shared.oss-cn-beijing.aliyuncs.com/go1.17.6.linux-amd64.tar.gz",
     };
     std::vector<std::string> tar_sha256sum = {
         "sha256:02adc5074f59777d2ca74c8a0291659f69291865184c987d9c10e58f58b162c2",
         // "sha256:05e8b01c1ddb6ba4f8c84e7dbc76529bdc09861f9ce17c213a49e8c334f184ed",
         "sha256:0ccf983abf0b0fb64cc969079982bc34761ce22d7a3236a40d49d840d150e09a",
         // "sha256:1041ec4e2f40156e0731be175388be4c67aeceb44829f988df213e9fd5f26dc9",
-        "sha256:562688d70dcd1596556e7c671c1266f6e9c22b4f4fb8344efa8bed88fc2bac7b"
-    };
+        "sha256:562688d70dcd1596556e7c671c1266f6e9c22b4f4fb8344efa8bed88fc2bac7b"};
     int i = 0;
     for (auto test_tgz : filelist) {
         auto jh1 = photon::thread_enable_join(photon::thread_create11(uds_server));
         std::string fn_test_tgz = basename(test_tgz.c_str());
-        ASSERT_EQ(
-            0, download(test_tgz, (workdir + fn_test_tgz).c_str()));
+        ASSERT_EQ(0, download(test_tgz, (workdir + fn_test_tgz).c_str()));
         auto file = lfs->open(fn_test_tgz.c_str(), O_RDONLY);
-        std::string tar_sha256="", idx_sha256="";
+        std::string tar_sha256 = "", idx_sha256 = "";
         uds_client(file);
         photon::thread_join(jh1);
         auto dst_sha256 = sha256sum("/tmp/dest");
@@ -323,7 +320,6 @@ TEST_F(GzIndexTest, stream) {
         lfs->unlink(fn_test_tgz.c_str());
     }
     remove(uds_path);
-
 }
 
 TEST_F(GzIndexTest, pread) {
@@ -406,9 +402,8 @@ protected:
         }
 
         auto mediafs = photon::fs::new_localfs_adaptor("/tmp/gzip_cache_compress");
-        lfs = photon::fs::new_full_file_cached_fs(
-                lfs, mediafs, 1024 * 1024, 1, 10000000,
-                (uint64_t)1048576 * 4096, nullptr, 0, nullptr);
+        lfs = photon::fs::new_full_file_cached_fs(lfs, mediafs, 1024 * 1024, 1, 10000000,
+                                                  (uint64_t)1048576 * 4096, nullptr, 0, nullptr);
         delete gzdata;
         gzdata = lfs->open(fn_gzdata, O_RDONLY, 0644);
         if (gzdata == nullptr) {
@@ -421,9 +416,9 @@ protected:
             exit(-1);
         }
 
-
         mediafs = photon::fs::new_localfs_adaptor("/tmp/gzip_cache_decompress");
-        cfs = Cache::new_gzip_cached_fs(mediafs, 1024 * 1024, 4, 10000000, (uint64_t)1048576 * 4096, nullptr);
+        cfs = Cache::new_gzip_cached_fs(mediafs, 1024 * 1024, 4, 10000000, (uint64_t)1048576 * 4096,
+                                        nullptr);
         gzfile = cfs->open_cached_gzip_file(gzfile, fn_defile);
         if (gzfile == nullptr) {
             LOG_ERROR("failed create new cached gzip file");
@@ -579,8 +574,7 @@ TEST_F(GzCacheTest, cache_store) {
     fread(cbuf2, 1, vsize, fp2);
     // refill_size is 1MB
     for (size_t i = 0; i < vsize; i++) {
-        if (check_in_interval(i, 0, 1 << 20) ||
-            check_in_interval(i, vsize - (1 << 20), vsize) ||
+        if (check_in_interval(i, 0, 1 << 20) || check_in_interval(i, vsize - (1 << 20), vsize) ||
             check_in_interval(i, 5 << 20, 6 << 20)) {
             EXPECT_EQ(cbuf1[i], cbuf2[i]);
         } else {
