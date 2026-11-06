@@ -1,0 +1,42 @@
+# pre-commit 配置：钩子仓库统一走 GitCode 镜像加速
+# 安装：pip install pre-commit && pre-commit install
+# 全量运行：pre-commit run --all-files
+minimum_pre_commit_version: "3.0.0"
+default_stages: [pre-commit]
+fail_fast: false
+
+# 文档、许可证、README 等非代码文件不参与格式校准
+exclude: |
+  (?ix)^(
+      docs/.*|
+      .*\.(md|rst)$|
+      (README|CONTRIBUTING|MAINTAINERS|LICENSE|NOTICE|CHANGELOG)[^/]*
+  )$
+
+repos:
+  # GitCode 镜像：https://github.com/pre-commit/pre-commit-hooks
+  - repo: https://gitcode.com/gh_mirrors/pr/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+      - id: check-executables-have-shebangs
+      - id: check-symlinks
+      - id: destroyed-symlinks
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # GitCode 镜像：https://github.com/pre-commit/mirrors-clang-format
+  - repo: https://gitcode.com/pre-commit-clang/mirrors-clang-format
+    rev: v14.0.6
+    hooks:
+      - id: clang-format
+        types_or: [c, c++]
+        # 第三方头文件/子模块/内嵌 LZ4 代码保持原样
+        exclude: ^(src/tools/CLI11\.hpp|src/overlaybd/zfile/(thirdparty|lz4)/)

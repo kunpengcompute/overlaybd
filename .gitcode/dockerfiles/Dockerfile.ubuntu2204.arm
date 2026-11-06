@@ -1,0 +1,55 @@
+# OverlayBD build / unit-test environment for linux/arm64 (also builds on linux/amd64).
+# Dependency list follows .github/workflows/cmake.yml, plus the tools needed for the
+# overlaybd build (CMake fetches photon/tcmu/e2fsprogs/ublksrv from source).
+
+FROM swr.cn-north-4.myhuaweicloud.com/cloud_boostkit/ubuntu_22.04:latest
+
+ARG GTEST_VERSION=1.11.0
+ARG BUILD_JOBS=8
+
+# github.com is not reliably reachable from mainland China; the same tag is mirrored on GitCode.
+ARG GTEST_MIRROR=https://gitcode.com/gh_mirrors/go/googletest.git
+
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    TZ=Etc/UTC
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# arm64 的 ubuntu-base 源指向 ports.ubuntu.com/ubuntu-ports
+RUN sed -i 's@//ports.ubuntu.com/ubuntu-ports@//repo.huaweicloud.com/ubuntu-ports@g; s@//archive.ubuntu.com@//repo.huaweicloud.com@g; s@//security.ubuntu.com@//repo.huaweicloud.com@g' /etc/apt/sources.list \
+    && apt-get update -o Acquire::Retries=2 \
+    && apt-get install -y --no-install-recommends -o Acquire::Retries=5 \
+        build-essential cmake ccache git ca-certificates curl wget tar gzip xz-utils unzip patch \
+        sudo pkg-config autoconf automake libtool help2man m4 gettext \
+        libgflags-dev libcurl4-openssl-dev libssl-dev libaio-dev \
+        libnl-3-dev libnl-genl-3-dev libzstd-dev zlib1g-dev \
+        uuid-dev libjson-c-dev libkmod-dev libsystemd-dev \
+        libpci-dev libext2fs-dev rapidjson-dev fio jq lsscsi \
+    && if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+        apt-get install -y --no-install-recommends nasm; \
+    fi \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    src=/tmp/googletest-src; \
+    if ! curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 3 --retry-all-errors \
+            "https://github.com/google/googletest/archive/refs/tags/release-${GTEST_VERSION}.tar.gz" \
+            -o /tmp/googletest.tar.gz; then \
+        echo "GitHub download failed, falling back to GitCode mirror: ${GTEST_MIRROR}"; \
+        git clone --depth 1 --branch "release-${GTEST_VERSION}" "${GTEST_MIRROR}" "${src}"; \
+    else \
+        mkdir -p "${src}"; \
+        tar -xzf /tmp/googletest.tar.gz -C "${src}" --strip-components=1; \
+    fi; \
+    cmake -S "${src}" -B "${src}/build" \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local; \
+    cmake --build "${src}/build" --parallel "${BUILD_JOBS}"; \
+    cmake --install "${src}/build"; \
+    ldconfig; \
+    rm -rf "${src}" /tmp/googletest.tar.gz
+
+WORKDIR /workspace
+CMD ["/bin/bash"]

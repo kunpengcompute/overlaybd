@@ -1,0 +1,50 @@
+name: Build Job
+
+on:
+  workflow_call:
+    inputs:
+      docker_img:
+        required: true
+        type: string
+      pr_id:
+        required: true
+        type: string
+      branch:            # PR 目标分支
+        required: true
+        type: string
+      default_branch:    # 默认分支（脚本回退用的检出位置）
+        required: true
+        type: string
+
+jobs:
+  JOB_Compile:
+    name: Compile
+    select: selected_by_default
+    runs-on: [ self-hosted, os=euler, arch=arm64, type=pr, flavor=large ]
+    container:
+      image: ${{ inputs.docker_img }}
+    steps:
+      - name: fast_checkout
+        identifier: fast_checkout
+        uses: checkout
+        with:
+          allow-unsafe-pr-checkout: true
+          ref: refs/merge-requests/${{ inputs.pr_id }}/merge
+      # ccache：命中时直接复用目标文件；key 随源码变化，restore-keys 兜底取最近一份
+      - name: ccache
+        uses: cache
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-build-${{ hashFiles('CMakeLists.txt', 'CMake/**', 'src/**', 'baselayers/**', '.gitmodules') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-build-
+            ccache-${{ runner.os }}-
+      # 编译产物（默认 BUILD_TESTING=off，只验证生产目标）
+      - name: build
+        run: |-
+          set -euo pipefail
+          if [ -f .gitcode/scripts/pr_build.sh ]; then
+            bash .gitcode/scripts/pr_build.sh
+          else
+            echo "ERROR: .gitcode/scripts/pr_build.sh 在预合入代码中均不存在"; exit 1
+          fi
