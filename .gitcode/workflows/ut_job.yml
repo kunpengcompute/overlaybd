@@ -1,0 +1,50 @@
+name: UT Job
+
+on:
+  workflow_call:
+    inputs:
+      docker_img:
+        required: true
+        type: string
+      pr_id:
+        required: true
+        type: string
+      branch:            # PR 目标分支
+        required: true
+        type: string
+      default_branch:    # 默认分支（脚本回退用的检出位置）
+        required: true
+        type: string
+
+jobs:
+  JOB_UT:
+    name: UT
+    select: selected_by_default
+    runs-on: [ self-hosted, os=euler, arch=arm64, type=pr, flavor=large ]
+    container:
+      image: ${{ inputs.docker_img }}
+    steps:
+      - name: fast_checkout
+        identifier: fast_checkout
+        uses: checkout
+        with:
+          allow-unsafe-pr-checkout: true
+          ref: refs/merge-requests/${{ inputs.pr_id }}/merge
+      # ccache：与 build 作业共用编译参数，未命中 ut 自己的缓存时回退到 build 的缓存
+      - name: ccache
+        uses: cache
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-ut-${{ hashFiles('CMakeLists.txt', 'CMake/**', 'src/**', 'baselayers/**', '.gitmodules') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-ut-
+            ccache-${{ runner.os }}-build-
+            ccache-${{ runner.os }}-
+      - name: ut
+        run: |-
+          set -euo pipefail
+          if [ -f .gitcode/scripts/pr_ut.sh ]; then
+            bash .gitcode/scripts/pr_ut.sh
+          else
+            echo "ERROR: .gitcode/scripts/pr_ut.sh 在预合入代码均不存在"; exit 1
+          fi
