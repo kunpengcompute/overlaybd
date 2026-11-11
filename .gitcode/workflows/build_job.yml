@@ -9,10 +9,7 @@ on:
       pr_id:
         required: true
         type: string
-      branch:            # PR 目标分支
-        required: true
-        type: string
-      default_branch:    # 默认分支（脚本回退用的检出位置）
+      target_branch:            # PR 目标分支
         required: true
         type: string
 
