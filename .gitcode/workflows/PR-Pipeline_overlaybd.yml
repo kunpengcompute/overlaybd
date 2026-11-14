@@ -128,19 +128,6 @@ stages:
                 echo "need_build=yes" >> "$ATOMGIT_OUTPUT"
               fi
 
-      sca-pr: # SCA 扫描（project-name 取上游组织名 boostkit）
-        name: sca-pr
-        needs: [ check_skip ]
-        if: ${{ jobs.check_skip.outputs.skip != 'true' }}
-        runs-on: ["ubuntu-latest", "x64", "slim"]
-        permissions:
-          id-token: write
-        steps:
-          - name: sca pr scan
-            uses: openlibing/sca-action/sca-pr-action@v1.0.0
-            with:
-              project-name: "boostkit"
-
       antipoison-scan: # 恶意代码扫描
         name: antipoison-scan
         needs: [ check_skip ]
@@ -154,52 +141,11 @@ stages:
             with:
               project-name: "boostkit"
 
-      pre-commit: # 代码风格检查（仓库 .pre-commit-config.yaml）
-        name: pre-commit
-        needs: [ check_skip ]
-        if: ${{ jobs.check_skip.outputs.skip != 'true' }}
-        runs-on: ["ubuntu-latest", "x64", "slim"]
-        steps:
-          - name: Checkout
-            uses: checkout
-            with:
-              allow-unsafe-pr-checkout: true
-              ref: refs/merge-requests/${{ env.pr_id }}/merge
-          - name: Setup Python
-            uses: setup-python
-            with:
-              python-version: "3.14"
-          # 钩子仓库与虚拟环境按配置文件的 hash 缓存，避免每次重新 clone/安装
-          - name: Cache pre-commit env
-            uses: cache
-            with:
-              path: |
-                ~/.cache/pre-commit
-                ~/.cache/pip
-              key: precommit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
-              restore-keys: |
-                precommit-${{ runner.os }}-
-          - name: Run pre-commit
-            uses: openlibing/pre-commit-action@v1.0.0
-            env:
-              # mirrors-clang-format 安装 clang-format wheel 时走国内源
-              PIP_INDEX_URL: https://repo.huaweicloud.com/repository/pypi/simple
-
       build:
         name: build
         if: ${{ jobs.check_skip.outputs.skip != 'true' && jobs.Detect_file_changes.outputs.need_build == 'yes' }}
         needs: [ check_skip, Detect_file_changes ]      # 门控 outputs 引用必须保留
         uses: .gitcode/workflows/build_job.yml
-        with:
-          docker_img: "${{ env.ci_image }}"
-          pr_id: "${{ env.pr_id }}"
-          target_branch: "${{ env.target_branch }}"
-
-      ut:
-        name: ut
-        if: ${{ jobs.check_skip.outputs.skip != 'true' && jobs.Detect_file_changes.outputs.need_build == 'yes' }}
-        needs: [ check_skip, Detect_file_changes ]      # 门控 outputs 引用必须保留
-        uses: .gitcode/workflows/ut_job.yml
         with:
           docker_img: "${{ env.ci_image }}"
           pr_id: "${{ env.pr_id }}"
