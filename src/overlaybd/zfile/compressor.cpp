@@ -33,6 +33,13 @@ extern "C" {
 }
 #endif
 
+#ifdef ENABLE_KAE
+#include "lz4/lz4-kae.h"
+#include "kae/kae_support.h"
+#include "kae/kae_zstd.h"
+#include <atomic>
+#endif
+
 using namespace std;
 
 namespace ZFile {
@@ -148,8 +155,12 @@ public:
 class LZ4Compressor : public BaseCompressor {
 public:
     bool qat_enable = false;
+    bool kae_enable = false;
 #ifdef ENABLE_QAT
     LZ4_qat_param *pQat = nullptr;
+#endif
+#ifdef ENABLE_KAE
+    LZ4_kae_param *pKae = nullptr;
 #endif
 
     ~LZ4Compressor() {
@@ -157,6 +168,12 @@ public:
         if (pQat) {
             qat_uninit(pQat);
             delete pQat;
+        }
+#endif
+#ifdef ENABLE_KAE
+        if (pKae) {
+            kae_uninit(pKae);
+            delete pKae;
         }
 #endif
     }
@@ -213,11 +230,23 @@ public:
             }
         }
 #endif
+#ifdef ENABLE_KAE
+        if (Kae::support_available()) {
+            pKae = new LZ4_kae_param();
+            if (kae_init(pKae) == 0) {
+                kae_enable = true;
+                LOG_INFO("LZ4 compression offloaded to KAE hardware");
+            } else {
+                delete pKae;
+                pKae = nullptr;
+            }
+        }
+#endif
         return 0;
     }
 
     int nbatch() override {
-        return (qat_enable ? DEFAULT_N_BATCH : 1);
+        return (qat_enable || kae_enable ? DEFAULT_N_BATCH : 1);
     }
 
     virtual int do_compress(size_t *src_chunk_len, size_t *dst_chunk_len,
@@ -234,6 +263,16 @@ public:
                                    &compressed_data[0], dst_chunk_len, nblock);
             if (ret == 0) return 0;
             /* Any QAT failure falls through to the CPU loop below. */
+        }
+#endif
+#ifdef ENABLE_KAE
+        if (kae_enable) {
+            /* dst_chunk_len in = capacity, out = actual compressed bytes. */
+            for (size_t i = 0; i < nblock; i++) dst_chunk_len[i] = dst_buffer_capacity / nblock;
+            ret = LZ4_compress_kae(pKae, &uncompressed_data[0], src_chunk_len,
+                                   &compressed_data[0], dst_chunk_len, nblock);
+            if (ret == 0) return 0;
+            /* Any KAE failure falls through to the CPU loop below. */
         }
 #endif
         for (size_t i = 0; i < nblock; i++) {
@@ -312,6 +351,21 @@ public:
         if (dst_len < max_dst_size) {
             LOG_ERROR_RETURN(ENOBUFS, -1, "dst_len should be greater than `", max_dst_size - 1);
         }
+#ifdef ENABLE_KAE
+        const auto *kapi = Kae::zstd_api();
+        if (kapi != nullptr) {
+            size_t kSize = kapi->compress(dst, dst_len, src, src_len, cLevel);
+            if (!kapi->isError(kSize)) {
+                return kSize;
+            }
+            /* Hardware path failed: disable it for the process and let the
+             * linked software zstd redo this block below. Output of both
+             * paths is community-zstd compatible. */
+            LOG_WARN("KAEZstd compress failed (`), falling back to software zstd",
+                     kapi->getErrorName(kSize));
+            Kae::disable_zstd();
+        }
+#endif
         size_t cSize = ZSTD_compress(dst, dst_len, src, src_len, cLevel);
         if (ZSTD_isError(cSize)) {
             LOG_ERROR_RETURN(0, -1, "compress error: `", ZSTD_getErrorName(cSize));
