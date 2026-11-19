@@ -361,33 +361,6 @@ TEST_F(ZFileTest, verify_builder) {
     }
     zfile_builder_1->close();
 
-#ifdef ENABLE_KAE
-    /* Hardware compression output is not byte-deterministic: it depends on
-     * per-context state and device scheduling, so two valid runs of the same
-     * input (or the same input across worker topologies) legitimately produce
-     * different compressed bytes and sizes. The worker-count contract is
-     * therefore verified on the decompressed data: both artifacts must be
-     * valid zfiles that decode to the same bytes. */
-    auto za = ZFile::zfile_open_ro(dst, false, false);
-    auto zb = ZFile::zfile_open_ro(dst_1, false, false);
-    ASSERT_NE(za, nullptr);
-    ASSERT_NE(zb, nullptr);
-    DEFER({
-        delete za;
-        delete zb;
-    });
-    char da[16 * 1024], db[16 * 1024];
-    off_t total = 0;
-    while (true) {
-        auto ra = za->read(da, sizeof(da));
-        auto rb = zb->read(db, sizeof(db));
-        EXPECT_EQ(ra, rb);
-        EXPECT_EQ(memcmp(da, db, ra), 0);
-        if (ra == 0) break;
-        total += ra;
-    }
-    EXPECT_EQ(total, _st.st_size);
-#else
     EXPECT_EQ(dst->lseek(0, SEEK_CUR), dst_1->lseek(0, SEEK_CUR));
     dst->lseek(0, 0);
     dst_1->lseek(0, 0);
@@ -399,7 +372,6 @@ TEST_F(ZFileTest, verify_builder) {
         EXPECT_EQ(memcmp(buf, buf_1, rc), 0);
         if (rc == 0) break;
     }
-#endif
 }
 
 int main(int argc, char **argv) {

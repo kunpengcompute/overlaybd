@@ -4,5 +4,3 @@ releases
 .vscode
 .idea
 deps/
-openspec/
-.claude
